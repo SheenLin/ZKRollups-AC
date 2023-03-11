@@ -1,0 +1,56 @@
+role role_Requester(Requester:agent,Gateway:agent,Kab:symmetric_key,SND,RCV:channel(dy))
+played_by Requester
+def=
+	local
+		State:nat,NGateway:text,AA:text, Salt:text
+	init
+		State := 0
+	transition
+		1. State=0 /\ RCV(start) =|> State' := 1 /\ Salt' := new() /\ AA' := new()  /\ 
+                        secret(Salt'.AA',sec_1,{Requester,Gateway}) /\ SND({Requester.Gateway.Salt'.AA'}_Kab)
+
+		2. State=1 /\ RCV({Gateway.Requester.NGateway'}_Kab) =|> 
+                   State':=2 /\ SND({Requester.Gateway.NGateway'}_Kab) /\ witness(Requester, Gateway, auth_1, NGateway')
+                   
+end role
+
+role role_Gateway(Gateway:agent,Requester:agent,Kab:symmetric_key,SND,RCV:channel(dy))
+played_by Gateway
+def=
+	local
+		State:nat,NGateway:text,AA:text, Salt:text
+	init
+		State := 0
+	transition
+		1. State=0 /\ RCV({Requester.Gateway.Salt'.AA'}_Kab) =|> 
+                   State':=1 /\  NGateway' := new() /\ SND({Gateway.Requester.NGateway'}_Kab)
+
+		2. State = 1 /\ RCV({Requester.Gateway.NGateway'}_Kab) =|> State' := 2 /\ request(Gateway, Requester, auth_1, NGateway')
+
+end role
+
+role session(Requester:agent,Gateway:agent,Kab:symmetric_key)
+def=
+	local
+		SND2,RCV2,SND1,RCV1:channel(dy)
+	composition
+		role_Gateway(Gateway,Requester,Kab,SND2,RCV2) /\ role_Requester(Requester,Gateway,Kab,SND1,RCV1)
+end role
+
+role environment()
+def=
+	const
+		kab:symmetric_key,
+        requester,gateway:agent,
+        sec_1, auth_1:protocol_id
+	intruder_knowledge = {requester,gateway}
+	composition
+		session(requester,gateway,kab) /\ session(requester,i,kab) /\ session(i,requester,kab)
+end role
+
+goal
+	secrecy_of sec_1
+        authentication_on auth_1
+end goal
+
+environment()

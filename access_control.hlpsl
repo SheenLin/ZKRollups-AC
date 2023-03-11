@@ -1,0 +1,161 @@
+role role_Requester(
+    Requester, Owner, Blockchain: agent,
+    KOwner, KRequester: public_key,
+    IDreq, IDdev, IDvk: text,
+    SND, RCV: channel (dy),
+    Hash: hash_func
+)
+
+played_by Requester
+def=
+    local
+        State: nat,
+        DS, RA, Pi, X, Token, IP: text,
+        HGetUserAttr, HRA, HAccessControl: message
+
+    init State := 0
+
+    transition
+    %%% Get User Attribute
+        1.  State = 0 /\ RCV(start) =|> State' := 1 /\ 
+        SND(Requester.Blockchain.IDreq.IDdev) /\ 
+        HGetUserAttr' := Hash(Requester.Blockchain.IDreq.IDdev) /\
+        witness(Requester, Blockchain, auth_get_attr, HGetUserAttr')
+
+    %%% Set User Attribute    
+        2.  State = 1 /\ RCV(Blockchain.Requester.IDreq.IDdev.{DS'}_KRequester) =|>
+
+    %%% Access Control
+        State' := 2 /\ RA' := new() /\ HRA' := Hash(RA') /\ 
+        HAccessControl' := Hash(Requester.Blockchain.IDreq.IDdev.HRA'.{RA'}_KOwner) /\
+        SND(Requester.Blockchain.IDreq.IDdev.HRA'.{RA'}_KOwner) /\
+        secret(RA', ra, {Requester, Owner}) /\ 
+        witness(Requester, Blockchain, auth_access_control, HAccessControl')
+
+    %%% Access Control Verify
+        3.  State = 2 /\ RCV(Blockchain.Requester.IDvk.Pi'.X'.{Token'.IP'}_KRequester) =|>
+            State' := 3
+
+end role
+
+role role_Owner(
+    Owner, Requester, Blockchain: agent,
+    KOwner, KRequester: public_key,
+    IDreq, IDdev, IDvk: text,
+    SND, RCV: channel (dy),
+    Hash: hash_func
+)
+played_by Owner
+def=
+    local
+        State: nat,
+        DS, RA, Pi, X, Token, IP, Flag: text,
+        HSetUserAttr, HRA, HACVerify: message
+    
+    init State := 0
+
+    transition
+    %%% Set User Attribute
+        1.  State = 0 /\ RCV(Blockchain.Owner.IDreq.IDdev) =|>  State' := 1 /\
+        DS' := new() /\ 
+        SND(Owner.Blockchain.IDreq.IDdev.{DS'}_KRequester) /\ 
+        secret(DS', ds, {Owner, Requester}) /\
+        HSetUserAttr' := Hash(Owner.Blockchain.IDreq.IDdev.{DS'}_KRequester) /\
+        witness(Owner, Blockchain, auth_set_attr, HSetUserAttr')
+
+    %%% Access Control
+        2.  State = 1 /\ RCV(Blockchain.Owner.IDreq.IDdev.HRA'.{RA'}_KOwner) =|>
+
+    %%% Access Control Verify
+            State' := 2 /\ Pi' := new() /\ X' := new() /\
+            Token' := new() /\ IP' := new() /\
+            HACVerify' := Hash(Owner.Blockchain.IDvk.Pi'.X'.{Token'.IP'}_KRequester) /\
+            SND(Owner.Blockchain.IDvk.Pi'.X'.{Token'.IP'}_KRequester) /\
+            secret(Token'.IP', txn, {Owner, Requester}) /\
+            witness(Owner, Blockchain, auth_ac_verify, {Owner, Requester})
+        
+end role
+
+
+role role_Blockchain(
+    Blockchain, Owner, Requester: agent,
+    KOwner, KRequester: public_key,
+    IDreq, IDdev, IDvk: text,
+    SND, RCV: channel (dy),
+    Hash: hash_func
+)
+played_by Blockchain
+def= 
+    local
+        State:nat,
+        DS, RA, Pi, X, Token, IP: text,
+        HGetUserAttr, HSetUserAttr, HAccessControl, HRA, HACVerify: message
+
+    init State := 0
+
+    transition
+    %%% Get User Attribute
+        1.  State = 0 /\ RCV(Requester.Blockchain.IDreq.IDdev) =|> State' := 1 /\
+        SND(Blockchain.Owner.IDreq.IDdev) /\
+        HGetUserAttr' := Hash(Requester.Blockchain.IDreq.IDdev) /\
+        wrequest(Blockchain, Owner, auth_get_attr, HGetUserAttr')
+
+    %%% Set User Attribute
+        2.  State = 1 /\ RCV(Owner.Blockchain.IDreq.IDdev.{DS'}_KRequester) =|> State' := 2 /\ 
+        HSetUserAttr' := Hash(Owner, Blockchain, auth_set_attr, Owner.Blockchain.IDreq.IDdev.{DS'}_KRequester) /\
+        SND(Blockchain.Requester.IDreq.IDdev.{DS'}_KRequester) /\ 
+        wrequest(Blockchain, Owner, auth_set_attr, HSetUserAttr')
+
+    %%% Access Control
+        3.  State = 2 /\ RCV(Requester.Blockchain.IDreq.IDdev.HRA'.{RA'}_KOwner) =|> State' := 3 /\
+        HAccessControl' := Hash(Requester.Blockchain.IDreq.IDdev.HRA'.{RA'}_KOwner) /\
+        wrequest(Blockchain, Requester, auth_access_control, HAccessControl') /\
+        SND(Blockchain.Owner.IDreq.IDdev.HRA'.{RA'}_KOwner)
+
+    %%% Access Control Verify
+        4.  State = 3 /\ RCV(Owner.Blockchain.IDvk.Pi'.X'.{Token'.IP'}_KRequester) =|>
+            State' := 4 /\ HACVerify' := Hash(Owner.Blockchain.IDvk.Pi'.X'.{Token'.IP'}_KRequester) /\
+            wrequest(Blockchain, Owner, auth_ac_verify, HACVerify') /\
+            SND(Blockchain.Requester.IDvk.Pi'.X'.{Token'.IP'}_KRequester)
+
+end role
+
+role session(Owner: agent, Requester: agent, Blockchain: agent, KRequester: public_key,
+    KOwner: public_key, IDreq: text, IDdev: text, IDvk: text, H: hash_func)
+def=
+    local
+        SNDOwner, RCVOwner, SNDRequester, RCVRequester, SNDBlockchain, RCVBlockchain: channel(dy)
+    composition
+        role_Owner(Owner, Requester, Blockchain, KOwner, KRequester, IDreq, IDdev, IDvk, SNDOwner, RCVOwner, H) /\ 
+        role_Requester(Requester, Owner, Blockchain, KOwner, KRequester, IDreq, IDdev, IDvk, SNDRequester, RCVRequester, H) /\ 
+        role_Blockchain(Blockchain, Owner, Requester, KOwner, KRequester, IDreq, IDdev, IDvk, SNDBlockchain, RCVBlockchain, H)
+
+end role
+
+role environment()
+def= 
+    const
+        kowner,krequester:public_key,
+        owner,requester, blockchain:agent,
+        idreq, iddev, idvk: text,
+        ds, ra, txn, auth_get_attr, auth_set_attr, auth_access_control, auth_ac_verify: protocol_id,
+        h: hash_func
+    intruder_knowledge = {owner, requester, blockchain, kowner, krequester, idreq, iddev, h}
+    composition
+        session(owner, requester, blockchain, kowner, krequester, idreq, iddev, idvk, h) /\
+        session(i, requester, blockchain, kowner, krequester, idreq, iddev, idvk, h) /\
+        session(owner, i, blockchain, kowner, krequester, idreq, iddev, idvk, h)
+end role
+
+goal
+    secrecy_of ds
+    secrecy_of ra
+    secrecy_of txn
+    authentication_on auth_get_attr
+    authentication_on auth_set_attr
+    authentication_on auth_access_control
+    authentication_on auth_ac_verify
+end goal
+
+environment()
+
